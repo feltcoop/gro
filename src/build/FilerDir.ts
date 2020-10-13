@@ -65,7 +65,7 @@ export const createFilerDir = (
 		const statsBySourcePath = await watcher.init();
 		await Promise.all(
 			Array.from(statsBySourcePath.entries()).map(([path, stats]) =>
-				stats.isDirectory() ? null : onChange({type: 'init', path, stats}, filerDir),
+				onChange({type: 'init', path, stats}, filerDir),
 			),
 		);
 	};

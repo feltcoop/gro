@@ -49,7 +49,7 @@ import {EcmaScriptTarget, DEFAULT_ECMA_SCRIPT_TARGET} from '../compile/tsHelpers
 import {deepEqual} from '../utils/deepEqual.js';
 import {ServedDir, ServedDirPartial, toServedDirs} from './ServedDir.js';
 
-export type FilerFile = SourceFile | CompiledFile; // TODO or Directory? source/compiled directory?
+export type FilerFile = SourceFile | CompiledFile | SourceDirectory | CompiledDirectory;
 
 export type SourceFile = CompilableSourceFile | NonCompilableSourceFile;
 export type CompilableSourceFile =
@@ -117,6 +117,16 @@ export interface CompiledBinaryFile extends BaseCompiledFile {
 interface BaseCompiledFile extends BaseFile {
 	readonly type: 'compiled';
 	readonly sourceFileId: string;
+}
+
+export interface SourceDirectory extends BaseDirectory {
+	readonly directoryType: 'source';
+}
+export interface CompiledDirectory extends BaseDirectory {
+	readonly directoryType: 'compiled';
+}
+interface BaseDirectory {
+	readonly type: 'directory';
 }
 
 export interface BaseFile {
@@ -379,7 +389,6 @@ export class Filer {
 					const files = await findFiles(outputDir, undefined, null);
 					await Promise.all(
 						Array.from(files.entries()).map(([path, stats]) => {
-							if (stats.isDirectory()) return;
 							const id = join(outputDir, path);
 							if (this.files.has(id)) return;
 							if (hasSourceExtension(id)) {
@@ -459,6 +468,9 @@ export class Filer {
 				if (change.stats.isDirectory()) {
 					// We could ensure the directory, but it's usually wasted work,
 					// and `fs-extra` takes care of adding missing directories when writing to disk.
+					if (change.type !== 'update') {
+						// TODO update source directory
+					}
 				} else {
 					const shouldCompile = await this.updateSourceFile(id, filerDir);
 					if (
