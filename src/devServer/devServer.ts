@@ -16,6 +16,7 @@ import {stripAfter} from '../utils/string.js';
 import {omitUndefined} from '../utils/object.js';
 import {
 	Filer,
+	CompilableSourceFile,
 	BaseFile,
 	getFileMimeType,
 	getFileContentsBuffer,
@@ -61,8 +62,11 @@ export const createDevServer = (opts: InitialOptions): DevServer => {
 		throw Error(`Use devServer.start() instead of devServer.server.listen()`);
 	};
 
+	const sockets: Set<ws> = new Set();
+
 	const wss = new ws.Server({server});
 	wss.on('connection', (socket) => {
+		sockets.add(socket);
 		socket.on('message', (message) => {
 			console.log('socket message', message);
 		});
@@ -71,6 +75,7 @@ export const createDevServer = (opts: InitialOptions): DevServer => {
 		});
 		socket.on('close', (e) => {
 			console.log('socket close', e);
+			sockets.delete(socket);
 		});
 		socket.on('error', (e) => {
 			console.log('socket error', e);
@@ -87,10 +92,16 @@ export const createDevServer = (opts: InitialOptions): DevServer => {
 		socket.on('upgrade', (e) => {
 			console.log('socket upgrade', e);
 		});
-		socket.send('hello from the server!!!');
 	});
 	wss.on('error', (e) => {
 		console.log('websocket server error', e);
+	});
+
+	filer.on('compiled', (sourceFile: CompilableSourceFile) => {
+		console.log('compiled!!', sourceFile.id);
+		for (const socket of sockets) {
+			socket.send(JSON.stringify({type: 'compiledSourceFile', sourceFile}));
+		}
 	});
 
 	return {

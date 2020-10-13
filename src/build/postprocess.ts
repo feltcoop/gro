@@ -87,6 +87,10 @@ export function postprocess(
 				if (importPath !== undefined) {
 					contents = injectSvelteCssImport(contents, importPath);
 				}
+			} else {
+				console.log('NO CSS COMPILATION');
+				const result = compilation.contents.match(/svelte-(\w+)"/)!;
+				console.log('originalSvelteHash', result);
 			}
 		}
 		return contents;

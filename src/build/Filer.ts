@@ -1,6 +1,7 @@
 import {resolve, extname, join, basename, dirname} from 'path';
 import lexer from 'es-module-lexer';
 import {createHash} from 'crypto';
+import {EventEmitter} from 'events';
 
 import {
 	FilerDir,
@@ -116,6 +117,7 @@ export interface CompiledBinaryFile extends BaseCompiledFile {
 interface BaseCompiledFile extends BaseFile {
 	readonly type: 'compiled';
 	readonly sourceFileId: string;
+	readonly buildConfig: BuildConfig;
 }
 
 export interface BaseFile {
@@ -145,7 +147,12 @@ const CACHED_BUILD_OPTIONS_FILENAME = 'cachedBuildOptions.json';
 export interface CachedSourceInfo {
 	sourceId: string;
 	contentsHash: string;
-	compilations: {id: string; encoding: Encoding}[];
+	compilations: CachedSourceInfoCompilation[];
+}
+interface CachedSourceInfoCompilation {
+	id: string;
+	encoding: Encoding;
+	buildConfigName: string;
 }
 const CACHED_SOURCE_INFO_DIR = 'cachedSourceInfo';
 
@@ -243,7 +250,7 @@ export const initOptions = (opts: InitialOptions): Options => {
 	};
 };
 
-export class Filer {
+export class Filer extends EventEmitter {
 	private readonly files: Map<string, FilerFile> = new Map();
 	private readonly dirs: FilerDir[];
 	private readonly cachedSourceInfo: Map<string, CachedSourceInfo> = new Map();
@@ -264,6 +271,7 @@ export class Filer {
 	readonly servedDirs: readonly ServedDir[];
 
 	constructor(opts: InitialOptions) {
+		super();
 		const {
 			dev,
 			compiler,
@@ -441,6 +449,7 @@ export class Filer {
 			Array.from(files.entries()).map(async ([path, stats]) => {
 				if (stats.isDirectory()) return;
 				const info: CachedSourceInfo = await readJson(`${cachedSourceInfoDir}/${path}`);
+				console.log('info', `${cachedSourceInfoDir}/${path}`, info);
 				this.cachedSourceInfo.set(info.sourceId, info);
 			}),
 		);
@@ -540,6 +549,7 @@ export class Filer {
 				newSourceContents,
 				filerDir,
 				this.cachedSourceInfo.get(id),
+				this.buildConfigs,
 			);
 			// If the created source file has its compiled files hydrated,
 			// we can infer that it doesn't need to be compiled.
@@ -662,6 +672,7 @@ export class Filer {
 								dir: compilation.dir,
 								extension: compilation.extension,
 								encoding: compilation.encoding,
+								buildConfig: compilation.buildConfig,
 								contents: postprocess(compilation, this, result, sourceFile),
 								sourceMapOf: compilation.sourceMapOf,
 								contentsBuffer: undefined,
@@ -678,6 +689,7 @@ export class Filer {
 								dir: compilation.dir,
 								extension: compilation.extension,
 								encoding: compilation.encoding,
+								buildConfig: compilation.buildConfig,
 								contents: postprocess(compilation, this, result, sourceFile),
 								contentsBuffer: compilation.contents,
 								contentsHash: undefined,
@@ -698,6 +710,7 @@ export class Filer {
 			syncFilesToDisk(newCompiledFiles, oldCompiledFiles, this.log),
 			this.updateCachedSourceInfo(newSourceFile),
 		]);
+		this.emit('compiled', newSourceFile); // TODO what's the right event for the css change use case? what other events do we need?
 	}
 
 	private async destroySourceId(id: string): Promise<void> {
@@ -723,7 +736,11 @@ export class Filer {
 		const cachedSourceInfo: CachedSourceInfo = {
 			sourceId: file.id,
 			contentsHash: getFileContentsHash(file),
-			compilations: file.compiledFiles.map((file) => ({id: file.id, encoding: file.encoding})),
+			compilations: file.compiledFiles.map((file) => ({
+				id: file.id,
+				encoding: file.encoding,
+				buildConfigName: file.buildConfig.name,
+			})),
 		};
 		// This is useful for debugging, but has false positives
 		// when source changes but output doesn't, like if comments get elided.
@@ -934,6 +951,7 @@ const createSourceFile = async (
 	contents: string | Buffer,
 	filerDir: FilerDir,
 	cachedSourceInfo: CachedSourceInfo | undefined,
+	buildConfigs: BuildConfig[] | null,
 ): Promise<SourceFile> => {
 	let contentsBuffer: Buffer | undefined = encoding === null ? (contents as Buffer) : undefined;
 	let contentsHash: string | undefined = undefined;
@@ -946,7 +964,7 @@ const createSourceFile = async (
 		}
 		contentsHash = toHash(contentsBuffer!);
 		if (contentsHash === cachedSourceInfo.contentsHash) {
-			compiledFiles = await reconstructCompiledFiles(cachedSourceInfo);
+			compiledFiles = await reconstructCompiledFiles(cachedSourceInfo, buildConfigs!);
 		}
 	}
 	if (filerDir.type === 'externals') {
@@ -1060,7 +1078,10 @@ const createSourceFile = async (
 	}
 };
 
-const reconstructCompiledFiles = (cachedSourceInfo: CachedSourceInfo): Promise<CompiledFile[]> =>
+const reconstructCompiledFiles = (
+	cachedSourceInfo: CachedSourceInfo,
+	buildConfigs: BuildConfig[],
+): Promise<CompiledFile[]> =>
 	Promise.all(
 		cachedSourceInfo.compilations.map(
 			async (compilation): Promise<CompiledFile> => {
@@ -1069,6 +1090,11 @@ const reconstructCompiledFiles = (cachedSourceInfo: CachedSourceInfo): Promise<C
 				const dir = dirname(id) + '/'; // TODO the slash is currently needed because paths.sourceId and the rest have a trailing slash, but this may cause other problems
 				const extension = extname(id);
 				const contents = await loadContents(compilation.encoding, id);
+				const buildConfig = buildConfigs.find((c) => c.name === compilation.buildConfigName);
+				if (buildConfig === undefined) {
+					console.log('id', id, buildConfigs, compilation);
+					throw Error(`Unable to find build config with name ${compilation.buildConfigName}`);
+				}
 				switch (compilation.encoding) {
 					case 'utf8':
 						return {
@@ -1078,6 +1104,7 @@ const reconstructCompiledFiles = (cachedSourceInfo: CachedSourceInfo): Promise<C
 							filename,
 							dir,
 							extension,
+							buildConfig,
 							encoding: compilation.encoding,
 							contents: contents as string,
 							sourceMapOf: id.endsWith(SOURCE_MAP_EXTENSION)
@@ -1096,6 +1123,7 @@ const reconstructCompiledFiles = (cachedSourceInfo: CachedSourceInfo): Promise<C
 							filename,
 							dir,
 							extension,
+							buildConfig,
 							encoding: compilation.encoding,
 							contents: contents as Buffer,
 							contentsBuffer: contents as Buffer,

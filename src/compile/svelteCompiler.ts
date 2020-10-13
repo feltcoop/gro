@@ -100,6 +100,7 @@ export const createSvelteCompiler = (opts: InitialOptions = {}): SvelteCompiler 
 			filename: id, // TODO should we be giving a different path?
 		});
 		const {js, css, warnings, stats} = output;
+		console.log('output', output);
 
 		for (const warning of warnings) {
 			onwarn(id, warning, handleWarn, log);
