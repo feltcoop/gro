@@ -2,9 +2,28 @@
 export class GroDevtools {
 	head: HTMLHeadElement;
 	styleElementsByPath: Map<string, HTMLLinkElement> = new Map();
+	socket: WebSocket;
 
 	constructor() {
 		this.head = document.getElementsByTagName('head')[0];
+
+		const socket = (this.socket = new WebSocket('ws://localhost:8999'));
+		socket.addEventListener('open', (event) => {
+			console.log('socket open', event);
+			socket.send('hello from the client!');
+		});
+		socket.addEventListener('message', (event) => {
+			console.log('socket message', event);
+		});
+		socket.addEventListener('close', (event) => {
+			console.log('socket close', event);
+		});
+		socket.addEventListener('error', (event) => {
+			console.log('socket error', event);
+		});
+		window.addEventListener('beforeunload', () => {
+			socket.close();
+		});
 	}
 
 	registerCss(path: string) {

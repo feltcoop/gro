@@ -8,6 +8,7 @@ import {
 	OutgoingHttpHeaders,
 } from 'http';
 import {ListenOptions} from 'net';
+import ws from 'ws';
 
 import {cyan, yellow, gray} from '../colors/terminal.js';
 import {Logger, SystemLogger} from '../utils/log.js';
@@ -23,6 +24,7 @@ import {
 
 export interface DevServer {
 	readonly server: Server;
+	readonly wss: ws.Server;
 	start(): Promise<void>;
 	readonly host: string;
 	readonly port: number;
@@ -59,8 +61,41 @@ export const createDevServer = (opts: InitialOptions): DevServer => {
 		throw Error(`Use devServer.start() instead of devServer.server.listen()`);
 	};
 
+	const wss = new ws.Server({server});
+	wss.on('connection', (socket) => {
+		socket.on('message', (message) => {
+			console.log('socket message', message);
+		});
+		socket.on('open', () => {
+			console.log('socket open');
+		});
+		socket.on('close', (e) => {
+			console.log('socket close', e);
+		});
+		socket.on('error', (e) => {
+			console.log('socket error', e);
+		});
+		socket.on('ping', (e) => {
+			console.log('socket ping', e);
+		});
+		socket.on('pong', (e) => {
+			console.log('socket pong', e);
+		});
+		socket.on('unexpected-response', (e) => {
+			console.log('socket unexpected-response', e);
+		});
+		socket.on('upgrade', (e) => {
+			console.log('socket upgrade', e);
+		});
+		socket.send('hello from the server!!!');
+	});
+	wss.on('error', (e) => {
+		console.log('websocket server error', e);
+	});
+
 	return {
 		server,
+		wss,
 		host,
 		port,
 		start: async () => {
